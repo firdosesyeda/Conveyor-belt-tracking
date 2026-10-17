@@ -1,0 +1,14 @@
+path: .
+train: train/images
+val: valid/images
+test: test/images
+
+nc: 1
+names: ['Box']
+
+roboflow:
+  workspace: firdose-syeda
+  project: conveyor-belt-product-tracking-1bnh8
+  version: 1
+  license: CC BY 4.0
+  url: https://app.roboflow.com/firdose-syeda/conveyor-belt-product-tracking-1bnh8/1

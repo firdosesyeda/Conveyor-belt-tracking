@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f5f7f8">
+    <title>Beltline — Conveyor Vision</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script defer src="{{ url_for('static', filename='app.js') }}"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="#top" aria-label="Beltline home">
+          <span class="brand-mark"><span></span><span></span><span></span></span>
+          <span class="brand-name">beltline<span class="brand-dot">.</span></span>
+        </a>
+        <div class="workspace-label">WORKSPACE</div>
+        <nav class="side-nav" aria-label="Main navigation">
+          <a class="nav-item active" href="#overview"><span class="nav-icon grid-icon">▦</span><span>Overview</span><span class="nav-active-dot"></span></a>
+          <a class="nav-item" href="#analysis"><span class="nav-icon">◉</span><span>Video analysis</span></a>
+          <a class="nav-item" href="#analytics"><span class="nav-icon bars-icon">▥</span><span>Analytics</span></a>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="help-card">
+            <div class="help-spark">✳</div>
+            <strong>Built for the belt</strong>
+            <p>YOLO26n detection with persistent object IDs.</p>
+          </div>
+          <div class="profile-row">
+            <div class="profile-avatar">CV</div>
+            <div class="profile-copy"><strong>Conveyor vision</strong><span>Local workspace</span></div>
+            <span class="profile-menu">···</span>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main-content" id="top">
+        <header class="topbar">
+          <div class="breadcrumbs"><span>Workspace</span><b>/</b><strong>Overview</strong></div>
+          <div class="topbar-right"><span class="local-badge"><i></i> LOCAL SESSION</span><div class="top-avatar">CV</div></div>
+        </header>
+
+        <div class="page-wrap" id="overview">
+          <section class="page-heading">
+            <div>
+              <div class="eyebrow"><span class="eyebrow-line"></span> CONVEYOR INTELLIGENCE</div>
+              <h1>See every product<span class="heading-period">.</span></h1>
+              <p class="page-subtitle">Track movement, count products, and surface useful insights from your belt footage.</p>
+            </div>
+            <div class="model-chip"><span class="chip-pulse"></span><span><b>Detector ready</b><small>{{ model_name }}</small></span><span class="chip-chevron">⌄</span></div>
+          </section>
+
+          <section class="upload-card" id="analysis">
+            <div class="section-title-row">
+              <div><span class="step-label"><span>01</span> VIDEO INPUT</span><h2>Start an analysis</h2></div>
+              <span class="privacy-note"><span class="lock-icon">⌑</span> Files stay on this device</span>
+            </div>
+            <div class="upload-layout">
+              <div class="drop-zone" id="dropZone" tabindex="0" role="button" aria-label="Choose a video to analyze">
+                <input id="videoInput" type="file" accept="video/mp4,video/quicktime,video/x-msvideo,video/x-matroska,video/webm,.m4v" hidden>
+                <div class="upload-icon-wrap"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 31V10m0 0-8 8m8-8 8 8M10 30v7a3 3 0 0 0 3 3h22a3 3 0 0 0 3-3v-7"/></svg></div>
+                <div class="drop-title">Drop your belt footage here</div>
+                <div class="drop-subtitle">or <button class="browse-button" id="browseButton" type="button">browse files</button></div>
+                <div class="file-types"><span>MP4</span><span>MOV</span><span>AVI</span><span>MKV</span><span>UP TO 2 GB</span></div>
+                <div class="selected-file" id="selectedFile" hidden><span class="file-check">✓</span><span id="fileName"></span><span id="fileSize" class="file-size"></span></div>
+              </div>
+              <div class="upload-side">
+                <div class="pipeline-title">ANALYSIS PIPELINE</div>
+                <div class="pipeline-step"><span class="pipeline-number">01</span><span class="pipeline-icon">▣</span><span><b>Detect products</b><small>YOLO26n · Box class</small></span><span class="pipeline-check">✓</span></div>
+                <div class="pipeline-connector"></div>
+                <div class="pipeline-step"><span class="pipeline-number">02</span><span class="pipeline-icon track-icon">⌖</span><span><b>Assign track IDs</b><small>ByteTrack · Persistent IDs</small></span><span class="pipeline-check">✓</span></div>
+                <div class="pipeline-connector"></div>
+                <div class="pipeline-step"><span class="pipeline-number">03</span><span class="pipeline-icon insight-icon">◒</span><span><b>Build analytics</b><small>Counts · Flow · Dwell</small></span><span class="pipeline-check">✓</span></div>
+                <button class="analyze-button" id="analyzeButton" disabled><span>Analyze video</span><span class="button-arrow">↗</span></button>
+              </div>
+            </div>
+            <div class="progress-area" id="progressArea" hidden>
+              <div class="progress-top"><div class="progress-state"><span class="progress-spinner" id="progressSpinner"></span><strong id="progressTitle">Preparing analysis…</strong><span id="progressMessage">Your video is queued.</span></div><span class="progress-percent" id="progressPercent">0%</span></div>
+              <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+            </div>
+            <div class="error-banner" id="errorBanner" hidden></div>
+          </section>
+
+          <section class="analytics-section" id="analytics">
+            <div class="analytics-heading"><div><span class="step-label"><span>02</span> OUTPUT ANALYTICS</span><h2>Production snapshot</h2></div><div class="analytics-actions"><span class="updated-label" id="analysisStatus"><i></i> AWAITING VIDEO</span><button class="export-button" id="exportButton" disabled><span>↓</span> Export report</button></div></div>
+            <div class="metric-grid">
+              <article class="metric-card metric-featured"><div class="metric-top"><span class="metric-label">UNIQUE PRODUCTS</span><span class="metric-icon mint">▣</span></div><div class="metric-value" id="totalProducts">—</div><div class="metric-foot"><span class="metric-note" id="classNote">Tracked product IDs</span><span class="metric-spark">↗</span></div></article>
+              <article class="metric-card"><div class="metric-top"><span class="metric-label">PEAK ON BELT</span><span class="metric-icon lilac">⌖</span></div><div class="metric-value" id="peakProducts">—</div><div class="metric-foot"><span class="metric-note">Max simultaneous objects</span></div></article>
+              <article class="metric-card"><div class="metric-top"><span class="metric-label">THROUGHPUT</span><span class="metric-icon orange">◷</span></div><div class="metric-value"><span id="throughput">—</span><small> / min</small></div><div class="metric-foot"><span class="metric-note">Products per minute</span></div></article>
+              <article class="metric-card"><div class="metric-top"><span class="metric-label">AVG. CONFIDENCE</span><span class="metric-icon blue">✳</span></div><div class="metric-value"><span id="confidence">—</span><small>%</small></div><div class="metric-foot"><span class="metric-note">Detection confidence</span></div></article>
+            </div>
+
+            <div class="insight-grid">
+              <article class="panel flow-panel">
+                <div class="panel-heading"><div><h3>Product flow</h3><p>New tracked products over time</p></div><div class="chart-legend"><span><i></i> Products</span><span id="chartDuration">—</span></div></div>
+                <div class="chart-wrap"><div class="chart-y-labels"><span>HIGH</span><span>MED</span><span>LOW</span></div><canvas id="flowChart" aria-label="Product flow chart"></canvas><div class="chart-empty" id="chartEmpty"><span class="empty-chart-icon">⌁</span><b>No flow data yet</b><span>Upload a video to see products move through your line.</span></div></div>
+                <div class="chart-x-labels"><span>00:00</span><span id="chartMidpoint">—</span><span id="chartEnd">—</span></div>
+              </article>
+              <article class="panel distribution-panel">
+                <div class="panel-heading"><div><h3>Class distribution</h3><p>Tracked products by class</p></div><span class="panel-more">···</span></div>
+                <div class="distribution-empty" id="distributionEmpty"><div class="donut-placeholder"><span>—</span></div><b>Waiting for detections</b><span>Product classes will appear here.</span></div>
+                <div class="distribution-content" id="distributionContent" hidden><div class="donut-chart" id="donutChart"><div class="donut-center"><strong id="donutTotal">0</strong><span>PRODUCTS</span></div></div><div class="class-legend" id="classLegend"></div></div>
+                <div class="mini-stat"><span>AVERAGE TIME IN VIEW</span><b id="avgDuration">—</b></div>
+              </article>
+            </div>
+
+            <div class="lower-grid video-comparison-grid">
+              <article class="panel video-panel"><div class="panel-heading"><div><h3>Input footage</h3><p id="inputVideoCaption">Your uploaded conveyor video</p></div><span class="video-ready" id="inputVideoReady">● SOURCE</span></div><div class="video-frame"><div class="video-empty input-empty"><div class="video-play">▶</div><b>Upload footage to begin.</b><span>Your original video preview will appear here.</span></div><video id="inputVideo" controls playsinline hidden></video></div></article>
+              <article class="panel video-panel"><div class="panel-heading"><div><h3>Detected &amp; tracked</h3><p id="videoCaption">Annotated video with product boxes and IDs</p></div><div class="video-panel-actions"><span class="video-ready" id="outputVideoReady">● WAITING</span><button class="download-video" id="downloadVideo" disabled>↓ <span>Download video</span></button></div></div><div class="video-frame"><div class="video-empty output-empty"><div class="video-play">◎</div><b>Tracked output will appear here.</b><span>Bounding boxes and object IDs are rendered into the video.</span></div><video id="outputVideo" controls playsinline hidden></video></div></article>
+            </div>
+            <div class="tracks-section">
+              <article class="panel tracks-panel"><div class="panel-heading"><div><h3>Recent tracks</h3><p>Object-level tracking detail</p></div><span class="track-count" id="trackCount">0 OBJECTS</span></div><div class="table-wrap"><table><thead><tr><th>TRACK ID</th><th>CLASS</th><th>CONF.</th><th>IN VIEW</th></tr></thead><tbody id="tracksBody"><tr class="empty-row"><td colspan="4"><span class="table-empty-icon">⌖</span>Track details will show here after analysis.</td></tr></tbody></table></div></article>
+            </div>
+            <footer class="page-footer"><span><span class="footer-mark">●</span> BELTLINE VISION</span><span>YOLO26n · Local video processing</span></footer>
+          </section>
+        </div>
+      </main>
+    </div>
+    <div class="toast" id="toast" role="status"></div>
+  </body>
+</html>
