@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import math
+import json
 import os
+import subprocess
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -9,6 +11,8 @@ from pathlib import Path
 from typing import Any
 
 import cv2
+import imageio_ffmpeg
+import numpy as np
 from flask import Flask, jsonify, render_template, request, send_file
 from ultralytics import YOLO
 from werkzeug.utils import secure_filename
@@ -18,12 +22,16 @@ ROOT = Path(__file__).resolve().parent
 STORE_DIR = ROOT / "webapp_data"
 UPLOAD_DIR = STORE_DIR / "uploads"
 OUTPUT_DIR = STORE_DIR / "outputs"
-DEFAULT_MODEL = (
+SMALL_OBJECT_MODEL = (
+    ROOT / "runs" / "detect" / "yolo26n-conveyor-small-objects" / "weights" / "best.pt"
+)
+TRAINED_MODEL = (
     ROOT / "runs" / "detect" / "yolo26n-conveyor-products" / "weights" / "best.pt"
 )
+DEFAULT_MODEL = SMALL_OBJECT_MODEL if SMALL_OBJECT_MODEL.is_file() else TRAINED_MODEL
 MODEL_PATH = Path(os.environ.get("YOLO_MODEL", str(DEFAULT_MODEL))).expanduser()
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
-CONFIDENCE = float(os.environ.get("YOLO_CONFIDENCE", "0.25"))
+CONFIDENCE = float(os.environ.get("YOLO_CONFIDENCE", "0.12"))
 
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -41,7 +49,27 @@ def update_job(job_id: str, **updates: Any) -> None:
             jobs[job_id].update(updates)
 
 
-def analyze_video(job_id: str, input_path: Path, output_path: Path) -> None:
+def point_in_polygon(x: float, y: float, polygon: list[list[float]]) -> bool:
+    inside = False
+    previous = len(polygon) - 1
+    for current in range(len(polygon)):
+        x1, y1 = polygon[current]
+        x2, y2 = polygon[previous]
+        if (y1 > y) != (y2 > y):
+            crossing_x = (x2 - x1) * (y - y1) / (y2 - y1 + 1e-12) + x1
+            if x < crossing_x:
+                inside = not inside
+        previous = current
+    return inside
+
+
+def analyze_video(
+    job_id: str,
+    input_path: Path,
+    output_path: Path,
+    zones: list[dict[str, Any]],
+    inference_size: int,
+) -> None:
     capture = cv2.VideoCapture(str(input_path))
     writer: cv2.VideoWriter | None = None
     try:
@@ -73,6 +101,8 @@ def analyze_video(job_id: str, input_path: Path, output_path: Path) -> None:
         model = YOLO(str(MODEL_PATH))
         tracks: dict[int, dict[str, Any]] = {}
         timeline: dict[int, dict[str, int]] = {}
+        zone_counts = {zone["id"]: 0 for zone in zones}
+        zone_track_ids = {zone["id"]: set() for zone in zones}
         total_detections = 0
         max_simultaneous = 0
         frame_index = 0
@@ -86,23 +116,36 @@ def analyze_video(job_id: str, input_path: Path, output_path: Path) -> None:
             prediction = model.track(
                 frame,
                 persist=True,
-                tracker="bytetrack.yaml",
+                tracker=str(ROOT / "bytetrack-small.yaml"),
                 conf=CONFIDENCE,
-                imgsz=640,
+                imgsz=inference_size,
                 verbose=False,
             )[0]
             boxes = prediction.boxes
             ids = boxes.id.int().cpu().tolist() if boxes.id is not None else []
             classes = boxes.cls.int().cpu().tolist() if boxes.cls is not None else []
             confidences = boxes.conf.cpu().tolist() if boxes.conf is not None else []
+            coordinates = boxes.xyxy.cpu().tolist() if boxes.xyxy is not None else []
+            # Only retain detections whose center lies inside a user-drawn zone.
+            # ByteTrack still sees the full frame, preserving IDs as products
+            # approach and leave the counting area.
+            zone_detection_indices = []
+            for detection_index, (x1, y1, x2, y2) in enumerate(coordinates):
+                center_x = ((x1 + x2) / 2) / width
+                center_y = ((y1 + y2) / 2) / height
+                if any(point_in_polygon(center_x, center_y, zone["points"]) for zone in zones):
+                    zone_detection_indices.append(detection_index)
             timestamp = (frame_index - 1) / fps
             second = int(timestamp)
             bucket = timeline.setdefault(second, {"new_tracks": 0, "detections": 0, "active": 0})
-            total_detections += len(confidences)
-            bucket["detections"] += len(confidences)
+            total_detections += len(zone_detection_indices)
+            bucket["detections"] += len(zone_detection_indices)
 
             active_ids: set[int] = set()
-            for index, track_id in enumerate(ids):
+            for index in zone_detection_indices:
+                if index >= len(ids):
+                    continue
+                track_id = ids[index]
                 active_ids.add(track_id)
                 class_id = classes[index] if index < len(classes) else -1
                 confidence = float(confidences[index]) if index < len(confidences) else 0.0
@@ -116,16 +159,77 @@ def analyze_video(job_id: str, input_path: Path, output_path: Path) -> None:
                         "last_frame": frame_index,
                         "detections": 0,
                         "confidence_sum": 0.0,
+                        "zones_entered": set(),
                     }
                     tracks[track_id] = track
                     bucket["new_tracks"] += 1
                 track["last_frame"] = frame_index
                 track["detections"] += 1
                 track["confidence_sum"] += confidence
+                if index < len(coordinates):
+                    x1, y1, x2, y2 = coordinates[index]
+                    center_x = ((x1 + x2) / 2) / width
+                    center_y = ((y1 + y2) / 2) / height
+                    for zone in zones:
+                        zone_id = zone["id"]
+                        if (
+                            zone_id not in track["zones_entered"]
+                            and point_in_polygon(center_x, center_y, zone["points"])
+                        ):
+                            track["zones_entered"].add(zone_id)
+                            zone_counts[zone_id] += 1
+                            zone_track_ids[zone_id].add(track_id)
 
             bucket["active"] = max(bucket["active"], len(active_ids))
             max_simultaneous = max(max_simultaneous, len(active_ids))
-            writer.write(prediction.plot())
+            zone_prediction = prediction[zone_detection_indices]
+            annotated = zone_prediction.plot()
+            if zones:
+                overlay = annotated.copy()
+                zone_colors = [(61, 177, 126), (220, 157, 77), (151, 128, 202), (76, 158, 211), (202, 112, 120), (102, 177, 182)]
+                pixel_polygons = []
+                for zone_index, zone in enumerate(zones):
+                    color = zone_colors[zone_index % len(zone_colors)]
+                    polygon = [
+                        (int(point[0] * width), int(point[1] * height))
+                        for point in zone["points"]
+                    ]
+                    pixel_polygons.append((zone, color, polygon))
+                    cv2.fillPoly(overlay, [np.array(polygon, dtype="int32")], color)
+                cv2.addWeighted(overlay, 0.12, annotated, 0.88, 0, annotated)
+                for zone, color, polygon in pixel_polygons:
+                    cv2.polylines(
+                        annotated,
+                        [np.array(polygon, dtype="int32")],
+                        True,
+                        color,
+                        max(2, round(min(width, height) / 360)),
+                        cv2.LINE_AA,
+                    )
+                    label_x = max(4, min(point[0] for point in polygon))
+                    label_y = max(22, min(point[1] for point in polygon) - 8)
+                    label = f"{zone['name']}: {zone_counts[zone['id']]}"
+                    (label_width, label_height), _ = cv2.getTextSize(
+                        label, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2
+                    )
+                    cv2.rectangle(
+                        annotated,
+                        (label_x, label_y - label_height - 8),
+                        (label_x + label_width + 12, label_y + 4),
+                        color,
+                        -1,
+                    )
+                    cv2.putText(
+                        annotated,
+                        label,
+                        (label_x + 6, label_y - 2),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.65,
+                        (255, 255, 255),
+                        2,
+                        cv2.LINE_AA,
+                    )
+            writer.write(annotated)
 
             if frame_index % 5 == 0:
                 progress = min(99, int(frame_index * 100 / total_frames)) if total_frames else 0
@@ -152,6 +256,7 @@ def analyze_video(job_id: str, input_path: Path, output_path: Path) -> None:
                 "confidence": round(track["confidence_sum"] / track["detections"], 4),
                 "duration_seconds": round(elapsed, 2),
                 "first_seen_seconds": round((track["first_frame"] - 1) / fps, 2),
+                "zones": sorted(track["zones_entered"]),
             }
             track_rows.append(row)
             class_counts[track["class"]] = class_counts.get(track["class"], 0) + 1
@@ -180,6 +285,15 @@ def analyze_video(job_id: str, input_path: Path, output_path: Path) -> None:
             "video_fps": round(fps, 2),
             "processed_frames": frame_index,
             "class_breakdown": class_counts,
+            "zones": [
+                {
+                    "id": zone["id"],
+                    "name": zone["name"],
+                    "count": zone_counts[zone["id"]],
+                    "track_ids": sorted(zone_track_ids[zone["id"]]),
+                }
+                for zone in zones
+            ],
             "timeline": [
                 {"second": second, **timeline[second]}
                 for second in range(max(timeline.keys(), default=-1) + 1)
@@ -188,6 +302,29 @@ def analyze_video(job_id: str, input_path: Path, output_path: Path) -> None:
         }
         writer.release()
         writer = None
+        # OpenCV's mp4v output is not reliably playable in browsers. Re-encode
+        # the annotated file as H.264 with a browser-compatible pixel format.
+        browser_output = output_path.with_name(f"{output_path.stem}_h264.mp4")
+        subprocess.run(
+            [
+                imageio_ffmpeg.get_ffmpeg_exe(),
+                "-y",
+                "-i",
+                str(output_path),
+                "-an",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-movflags",
+                "+faststart",
+                str(browser_output),
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        browser_output.replace(output_path)
         update_job(
             job_id,
             state="complete",
@@ -222,6 +359,35 @@ def start_analysis():
     if extension not in ALLOWED_EXTENSIONS:
         return jsonify(error="Use an MP4, MOV, AVI, MKV, WEBM, or M4V video."), 400
 
+    try:
+        requested_zones = json.loads(request.form.get("zones", "[]"))
+        inference_size = int(request.form.get("imgsz", "1280"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return jsonify(error="Invalid zone or image-size settings."), 400
+    if not isinstance(requested_zones, list) or len(requested_zones) > 12:
+        return jsonify(error="Create up to 12 counting zones."), 400
+    if inference_size not in {640, 960, 1280}:
+        return jsonify(error="Choose an inference size of 640, 960, or 1280."), 400
+
+    zones = []
+    for index, raw_zone in enumerate(requested_zones):
+        if not isinstance(raw_zone, dict):
+            return jsonify(error=f"Zone {index + 1} is invalid."), 400
+        raw_points = raw_zone.get("points", [])
+        if not isinstance(raw_points, list) or len(raw_points) < 3:
+            return jsonify(error=f"Zone {index + 1} needs at least three points."), 400
+        points = []
+        try:
+            for point in raw_points:
+                x, y = float(point["x"]), float(point["y"])
+                if not (0 <= x <= 1 and 0 <= y <= 1):
+                    raise ValueError
+                points.append([x, y])
+        except (KeyError, TypeError, ValueError, IndexError):
+            return jsonify(error=f"Zone {index + 1} has an invalid point."), 400
+        zone_name = str(raw_zone.get("name", f"Zone {index + 1}"))[:32].strip()
+        zones.append({"id": str(raw_zone.get("id", f"zone-{index + 1}")), "name": zone_name or f"Zone {index + 1}", "points": points})
+
     safe_name = secure_filename(upload.filename) or "conveyor-video.mp4"
     job_id = uuid.uuid4().hex
     input_path = UPLOAD_DIR / f"{job_id}_{safe_name}"
@@ -238,7 +404,7 @@ def start_analysis():
     }
     with jobs_lock:
         jobs[job_id] = job
-    executor.submit(analyze_video, job_id, input_path, output_path)
+    executor.submit(analyze_video, job_id, input_path, output_path, zones, inference_size)
     return jsonify(job), 202
 
 

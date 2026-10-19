@@ -1,6 +1,23 @@
-
-runs/
-webapp_data/
-*.pt
+# Python
 __pycache__/
 *.py[cod]
+*.pyd
+.pytest_cache/
+
+# Virtual environments and secrets
+.venv/
+venv/
+env/
+.env
+
+# YOLO training outputs and model weights
+
+# Local app uploads and generated videos
+
+
+# Editor and operating system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+``)
